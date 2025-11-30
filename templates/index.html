@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Chatbot</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 800px;
+            height: 90vh;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            background: #2563eb;
+            color: white;
+            padding: 20px;
+            border-radius: 10px 10px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            font-size: 14px;
+        }
+
+        .btn {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        .upload-btn {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-btn input[type="file"] {
+            position: absolute;
+            left: -9999px;
+        }
+
+        .docs-info {
+            font-size: 12px;
+            color: rgba(255,255,255,0.9);
+        }
+
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #fafafa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 10px;
+            line-height: 1.5;
+        }
+
+        .message.user .message-bubble {
+            background: #2563eb;
+            color: white;
+        }
+
+        .message.assistant .message-bubble {
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+        }
+
+        .sources {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 5px;
+            font-size: 12px;
+            border-left: 3px solid #2563eb;
+        }
+
+        .source-item {
+            margin: 5px 0;
+            color: #666;
+        }
+
+        .input-area {
+            padding: 15px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-area input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 15px;
+            outline: none;
+        }
+
+        .input-area input:focus {
+            border-color: #2563eb;
+        }
+
+        .send-btn {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            font-size: 15px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .send-btn:hover {
+            background: #1d4ed8;
+        }
+
+        .send-btn:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #2563eb;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>💬 RAG Chatbot</h1>
+            <div class="controls">
+                <label class="upload-btn btn">
+                    📤 Upload PDF
+                    <input type="file" id="fileInput" accept=".pdf" onchange="uploadFile()">
+                </label>
+                <span class="docs-info" id="docsInfo">Loading...</span>
+                <label>
+                    <input type="checkbox" id="useRag" checked> RAG
+                </label>
+                <button class="btn" onclick="clearChat()">Clear</button>
+            </div>
+        </div>
+
+        <div class="messages" id="messages">
+            <!-- Empty - no initial message -->
+        </div>
+
+        <div class="input-area">
+            <input 
+                type="text" 
+                id="input" 
+                placeholder="Type your message..."
+                onkeypress="if(event.key==='Enter') sendMessage()"
+            >
+            <button class="send-btn" onclick="sendMessage()" id="sendBtn">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const sessionId = 'user_' + Date.now();
+        let isProcessing = false;
+
+        // Load document info on page load
+        async function loadDocInfo() {
+            try {
+                const response = await fetch('/documents');
+                const data = await response.json();
+                document.getElementById('docsInfo').textContent = 
+                    `${data.total_documents} docs, ${data.total_chunks} chunks`;
+            } catch (error) {
+                document.getElementById('docsInfo').textContent = 'Error loading docs';
+            }
+        }
+
+        // Upload PDF file
+        async function uploadFile() {
+            const input = document.getElementById('fileInput');
+            const file = input.files[0];
+            
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            // Show uploading message
+            addMessage(`Uploading ${file.name}...`, 'assistant');
+            
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    addMessage(`✅ ${data.message}\n${data.chunks_added} chunks added!`, 'assistant');
+                    loadDocInfo(); // Refresh doc count
+                } else {
+                    addMessage(`❌ ${data.message}`, 'assistant');
+                }
+                
+            } catch (error) {
+                addMessage('❌ Upload failed', 'assistant');
+                console.error('Upload error:', error);
+            }
+            
+            // Clear file input
+            input.value = '';
+        }
+
+        function addMessage(content, role, sources = null) {
+            const messages = document.getElementById('messages');
+            const msg = document.createElement('div');
+            msg.className = `message ${role}`;
+            
+            let sourcesHtml = '';
+            if (sources && sources.length > 0) {
+                sourcesHtml = '<div class="sources"><strong>📚 Sources:</strong>';
+                sources.forEach(s => {
+                    sourcesHtml += `<div class="source-item">• ${s.source} (${s.score.toFixed(3)})</div>`;
+                });
+                sourcesHtml += '</div>';
+            }
+            
+            msg.innerHTML = `
+                <div class="message-bubble">
+                    ${content.replace(/\n/g, '<br>')}
+                    ${sourcesHtml}
+                </div>
+            `;
+            
+            messages.appendChild(msg);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function showLoading() {
+            const messages = document.getElementById('messages');
+            const loading = document.createElement('div');
+            loading.className = 'message assistant';
+            loading.id = 'loading';
+            loading.innerHTML = '<div class="message-bubble"><div class="loading"></div></div>';
+            messages.appendChild(loading);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function hideLoading() {
+            const loading = document.getElementById('loading');
+            if (loading) loading.remove();
+        }
+
+        async function sendMessage() {
+            if (isProcessing) return;
+            
+            const input = document.getElementById('input');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            addMessage(message, 'user');
+            input.value = '';
+            
+            isProcessing = true;
+            document.getElementById('sendBtn').disabled = true;
+            showLoading();
+            
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: sessionId,
+                        top_k: 4,
+                        use_rag: document.getElementById('useRag').checked
+                    })
+                });
+                
+                const data = await response.json();
+                hideLoading();
+                addMessage(data.response, 'assistant', data.sources);
+                
+            } catch (error) {
+                hideLoading();
+                addMessage('Sorry, there was an error.', 'assistant');
+                console.error('Error:', error);
+            } finally {
+                isProcessing = false;
+                document.getElementById('sendBtn').disabled = false;
+                input.focus();
+            }
+        }
+
+        async function clearChat() {
+            if (!confirm('Clear conversation?')) return;
+            
+            try {
+                await fetch('/clear-history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `session_id=${sessionId}`
+                });
+                
+                document.getElementById('messages').innerHTML = `
+                    <div class="message assistant">
+                        <div class="message-bubble">Chat cleared! How can I help?</div>
+                    </div>
+                `;
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        document.getElementById('input').focus();
+        loadDocInfo(); // Load document info on startup
+    </script>
+</body>
+</html>
